@@ -1,0 +1,112 @@
+version: '3.9'
+
+services:
+  mws-app:
+    image: mws_new:10.15  # replace with your actual image
+    ports:
+      - "8585:8585"
+    container_name: mws
+    environment:
+      DB_TYPE: "postgres"
+      DB_URL: "jdbc:wm:postgresql://wmdb:5432;databaseName=wm"
+      DB_USERNAME: "wm"
+      DB_PASSWORD: "wm"
+      NODE_NAME: "default-node"
+      INSTANCE_NAME: "default"
+      SAG_HOME: "/opt/softwareag"        # example default value
+      VOLUMES_DIR: "/opt/mws-volumes"   # base path inside container
+    volumes:
+      - ./mws/volumes/apps:/opt/mws-volumes/apps
+      - ./mws/volumes/configs:/opt/mws-volumes/configs
+      - ./mws/volumes/data:/opt/mws-volumes/data
+      - ./mws/volumes/libs:/opt/mws-volumes/libs
+      - ./mws/volumes/logs:/opt/mws-volumes/logs
+      - ./mws/volumes/patches:/opt/mws-volumes/patches
+      - ./dcc/init:/tmp
+    user: "1724:1724"
+    restart: unless-stopped
+    networks:
+      - localdev
+    depends_on:
+      - db-init
+  
+  msr:
+    environment:
+      - EXTERNALIZE_PACKAGES=true
+      - HOST_DIR=/msr/server
+      - SERVICE_NAME=msr-dev
+      - SAG_IS_LICENSE_FILE=/msr/license/licenseKey.xml
+    image: msr:10.15  # replace with your actual image
+    volumes:
+      - ./msr/license:/license
+      - ./msr/server:/server
+      - ./dcc/init:/tmp
+    ports:
+      - "5555:5555"
+      - "9999:9999"
+    restart: unless-stopped
+    networks:
+      - localdev
+    depends_on:
+      - db-init
+
+  wmdb:
+    image: docker.io/library/postgres:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: wm
+      POSTGRES_PASSWORD: wm
+      POSTGRES_DB: wm
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - localdev
+
+  db-init:
+    image: dcc:10.15
+    restart: "no"
+    depends_on:
+      - wmdb
+    volumes:
+      - ./dcc/logs:/opt/softwareag/common/db/logs/
+      - ./dcc/init:/tmp
+    networks:
+      - localdev
+    entrypoint: [ "sh", "-c" ]
+    command: >
+      "/opt/softwareag/common/db/bin/dbConfigurator.sh -a create -pr MWS -u wm -p wm -d postgres -l jdbc:wm:postgresql://wmdb:5432;databaseName=wm && touch /tmp/ready"
+
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]  # Or check logs, endpoint, etc.
+      interval: 1s
+      retries: 5
+
+services:
+  um-server:
+    image: ibmwebmethods.azurecr.io/universalmessaging-server:10.15.0.27
+    container_name: um-server
+    environment:
+      SAG_HOME: /opt/softwareag
+      INSTANCE_NAME: default
+    ports:
+      - "9000:9000"     # Administration GUI (Enterprise Manager)
+      - "40000:40000"   # nsp port (Native Server Protocol)
+      - "40001:40001"   # nhp port (HTTP access)
+    volumes:
+      - um-data:/opt/softwareag/UniversalMessaging/server/default/data
+      - um-logs:/opt/softwareag/UniversalMessaging/server/default/logs
+      - um-config:/opt/softwareag/UniversalMessaging/server/default/bin
+    restart: unless-stopped
+    networks:
+      - localdev
+
+networks:
+  localdev:
+
+volumes:
+  db_data:  
+    driver: local
+  um-data:
+  um-logs:
+  um-config:
