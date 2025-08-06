@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   mws-app:
-    image: mws_new:10.15  # replace with your actual image
+    image: ${MWS_IMAGE:-mws:10.15}  # replace with your actual image
     ports:
       - "8585:8585"
     container_name: mws
@@ -14,15 +14,14 @@ services:
       NODE_NAME: "default-node"
       INSTANCE_NAME: "default"
       SAG_HOME: "/opt/softwareag"        # example default value
-      VOLUMES_DIR: "/opt/mws-volumes"   # base path inside container
     volumes:
-      - ./mws/volumes/apps:/opt/mws-volumes/apps
-      - ./mws/volumes/configs:/opt/mws-volumes/configs
-      - ./mws/volumes/data:/opt/mws-volumes/data
-      - ./mws/volumes/libs:/opt/mws-volumes/libs
-      - ./mws/volumes/logs:/opt/mws-volumes/logs
-      - ./mws/volumes/patches:/opt/mws-volumes/patches
-      - ./dcc/init:/tmp
+      - ./mws/apps:/opt/softwareag/MWS/volumes/apps
+      - ./mws/configs:/opt/softwareag/MWS/volumes/configs
+      - ./mws/data:/opt/softwareag/MWS/volumes/data
+      - ./mws/libs:/opt/softwareag/MWS/volumes/libs
+      - ./mws/logs:/opt/softwareag//MWS/volumes/logs
+      - ./mws/patches:/opt/softwareag/MWS/volumes/patches
+      - init:/init
     user: "1724:1724"
     restart: unless-stopped
     networks:
@@ -32,23 +31,26 @@ services:
   
   msr:
     environment:
-      - EXTERNALIZE_PACKAGES=true
-      - HOST_DIR=/msr/server
+      - HOST_DIR=/server
+      - EXTERNALIZE_PACKAGES=false
+      - PERSIST_CONFIGS=true
+      - PERSIST_LOGS=false
+      - SAG_IS_CONFIG_PROPERTIES=/server/application.properties
+      - SAG_IS_LICENSE_FILE=/license/licenseKey.xml
       - SERVICE_NAME=msr-dev
-      - SAG_IS_LICENSE_FILE=/msr/license/licenseKey.xml
-    image: msr:10.15  # replace with your actual image
+    image: ${MSR_IMAGE:-msr-testsuite:10.15} # replace with your actual image
     volumes:
       - ./msr/license:/license
-      - ./msr/server:/server
-      - ./dcc/init:/tmp
+      - msr-config:/server:Z
+      - ${GIT_PACKAGE_ROOT}:/git:Z
+      - msr-packages:/opt/softwareag/IntegrationServer/packages
     ports:
       - "5555:5555"
+      - "5543:5543"
       - "9999:9999"
     restart: unless-stopped
     networks:
       - localdev
-    depends_on:
-      - db-init
 
   wmdb:
     image: docker.io/library/postgres:latest
@@ -70,42 +72,24 @@ services:
       - wmdb
     volumes:
       - ./dcc/logs:/opt/softwareag/common/db/logs/
-      - ./dcc/init:/tmp
+      - init:/init
     networks:
       - localdev
     entrypoint: [ "sh", "-c" ]
     command: >
-      "/opt/softwareag/common/db/bin/dbConfigurator.sh -a create -pr MWS -u wm -p wm -d postgres -l jdbc:wm:postgresql://wmdb:5432;databaseName=wm && touch /tmp/ready"
+      "/opt/softwareag/common/db/bin/dbConfigurator.sh -a create -pr MWS,PRE,Monitor,IS -u wm -p wm -d postgres -l jdbc:wm:postgresql://wmdb:5432;databaseName=wm && touch /init/ready"
 
     healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/ready"]  # Or check logs, endpoint, etc.
+      test: ["CMD", "test", "-f", "/init/ready"]  # Or check logs, endpoint, etc.
       interval: 1s
       retries: 5
-
-  um-server:
-    image: ibmwebmethods.azurecr.io/universalmessaging-server:10.15.0.27
-    container_name: um-server
-    environment:
-      SAG_HOME: /opt/softwareag
-      INSTANCE_NAME: default
-    ports:
-      - "9000:9000"     # Administration GUI (Enterprise Manager)
-      - "40000:40000"   # nsp port (Native Server Protocol)
-      - "40001:40001"   # nhp port (HTTP access)
-    volumes:
-      - um-data:/opt/softwareag/UniversalMessaging/server/default/data
-      - um-logs:/opt/softwareag/UniversalMessaging/server/default/logs
-      - um-config:/opt/softwareag/UniversalMessaging/server/default/bin
-    restart: unless-stopped
-    networks:
-      - localdev
 
 networks:
   localdev:
 
 volumes:
   db_data:  
-    driver: local
-  um-data:
-  um-logs:
-  um-config:
+  init:
+  msr-packages:
+  msr-config:
+
